@@ -1,7 +1,5 @@
 package storage
 
-import "time"
-
 type Storage interface {
 	CreatePoll(poll Poll) (string, error)
 	GetPoll(id string) (*Poll, error)
@@ -23,8 +21,17 @@ type Poll struct {
 }
 
 type Vote struct {
-	PollID  string    `json:"poll_id"`
-	UserID  string    `json:"user_id"`
-	Option  string    `json:"option"`
-	VotedAt time.Time `json:"voted_at"`
+	PollID  string `json:"poll_id"`
+	UserID  string `json:"user_id"`
+	Option  string `json:"option"`
+	VotedAt int64  `json:"voted_at"`
+}
+
+type PollResult struct {
+	PollID     string            `json:"poll_id"`
+	Question   string            `json:"question"`
+	Options    map[string]string `json:"options"`
+	Votes      map[string]int    `json:"votes"`
+	TotalVotes int               `json:"total_votes"`
+	IsActive   bool              `json:"is_active"`
 }

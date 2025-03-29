@@ -80,7 +80,7 @@ func (b *Bot) handleCreatePoll(commandArgs *model.CommandArgs) error {
 }
 
 func (b *Bot) handleVote(commandArgs *model.CommandArgs) error {
-	args := strings.Fields(commandArgs.Command)
+	args := strings.Split(commandArgs.Command, " ")
 
 	if len(args) < 4 {
 		if err := b.SendMessage("Invalid request"); err != nil {
@@ -93,6 +93,12 @@ func (b *Bot) handleVote(commandArgs *model.CommandArgs) error {
 	option := args[3]
 
 	err := b.Store.Vote(pollID, commandArgs.UserId, option)
+	if err == fmt.Errorf("poll does not exist") {
+		if err := b.SendMessage("Poll does not exist"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
+	}
 	if err != nil {
 		if err := b.SendMessage("Something went wrong..."); err != nil {
 			return fmt.Errorf("error when sending a message: %e", err)
@@ -120,6 +126,12 @@ func (b *Bot) handleResults(commandArgs *model.CommandArgs) error {
 	pollID := args[2]
 
 	results, err := b.Store.GetResults(pollID)
+	if err == fmt.Errorf("poll does not exist") {
+		if err := b.SendMessage("Poll does not exist"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
+	}
 	if err != nil {
 		if err := b.SendMessage("Something went wrong..."); err != nil {
 			return fmt.Errorf("error when sending a message: %e", err)
@@ -153,6 +165,12 @@ func (b *Bot) handleEndPoll(commandArgs *model.CommandArgs) error {
 
 	pollID := args[2]
 	err := b.Store.EndPoll(pollID, commandArgs.UserId)
+	if err == fmt.Errorf("poll does not exist") {
+		if err := b.SendMessage("Poll does not exist"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
+	}
 	if err != nil {
 		if err := b.SendMessage("Something went wrong..."); err != nil {
 			return fmt.Errorf("error when sending a message: %e", err)
@@ -179,6 +197,12 @@ func (b *Bot) handleDeletePoll(commandArgs *model.CommandArgs) error {
 
 	pollID := args[2]
 	err := b.Store.DeletePoll(pollID, commandArgs.UserId)
+	if err == fmt.Errorf("poll does not exist") {
+		if err := b.SendMessage("Poll does not exist"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
+	}
 	if err != nil {
 		if err := b.SendMessage("Something went wrong..."); err != nil {
 			return fmt.Errorf("error when sending a message: %e", err)

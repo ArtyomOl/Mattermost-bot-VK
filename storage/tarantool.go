@@ -27,9 +27,9 @@ func NewTarantoolStorage(cfg config.TarantoolConfig) (*TarantoolStorage, error) 
 	return &TarantoolStorage{conn: conn}, nil
 }
 
-func (s *TarantoolStorage) InitSchema(schemaName string) error {
+func (s *TarantoolStorage) InitPollsSchema() error {
 	query := &tarantool.Call{Name: "box.schema.create_space", Tuple: []interface{}{
-		schemaName,
+		"polls",
 		map[string]interface{}{
 			"format": []map[string]interface{}{
 				{"name": "id", "type": "string"},
@@ -44,7 +44,7 @@ func (s *TarantoolStorage) InitSchema(schemaName string) error {
 	s.conn.Exec(context.Background(), query)
 
 	query = &tarantool.Call{
-		Name: "box.space." + schemaName + ":create_index",
+		Name: "box.space.polls:create_index",
 		Tuple: []interface{}{
 			"primary",
 			map[string]interface{}{
@@ -62,6 +62,70 @@ func (s *TarantoolStorage) InitSchema(schemaName string) error {
 	log.Println("Init space")
 
 	return nil
+}
+
+func (s *TarantoolStorage) InitVotesSchema() error {
+	query := &tarantool.Call{Name: "box.schema.create_space", Tuple: []interface{}{
+		"votes",
+		map[string]interface{}{
+			"format": []map[string]interface{}{
+				{"name": "id", "type": "string"},
+				{"name": "creator_id", "type": "string"},
+				{"name": "option", "type": "string"},
+				{"name": "created_at", "type": "unsigned"},
+			},
+		},
+	}}
+	s.conn.Exec(context.Background(), query)
+
+	query = &tarantool.Call{
+		Name: "box.space.votes:create_index",
+		Tuple: []interface{}{
+			"primary",
+			map[string]interface{}{
+				"type":          "hash",
+				"parts":         []interface{}{"id"},
+				"if_not_exists": true,
+			},
+		},
+	}
+	resp := s.conn.Exec(context.Background(), query)
+	if resp.Error != nil {
+		return fmt.Errorf("failed to create space index: %w", resp.Error)
+	}
+
+	log.Println("Init space")
+
+	return nil
+}
+
+func (s *TarantoolStorage) DeleteVotesSpace() error {
+	// Lua-скрипт для проверки существования space и его удаления
+	luaCode := `
+        if box.space.votes ~= nil then
+            box.space.votes:drop()
+            return true
+        else
+            return false, "space 'votes' does not exist"
+        end
+    `
+
+	query := &tarantool.Eval{
+		Expression: luaCode,
+	}
+
+	resp := s.conn.Exec(context.Background(), query)
+
+	if resp.Error != nil {
+		return fmt.Errorf("failed to execute Lua script: %v", resp.Error)
+	}
+
+	if len(resp.Data) == 0 {
+		return fmt.Errorf("no response from Tarantool")
+	}
+
+	return nil
+
 }
 
 func (s *TarantoolStorage) CreatePoll(poll Poll) (string, error) {
@@ -140,37 +204,53 @@ func (s *TarantoolStorage) Vote(pollID, userID, option string) error {
 		pollID,
 		userID,
 		option,
-		time.Now().Unix(),
+		uint64(time.Now().Unix()),
 	},
 	}
-	s.conn.Exec(context.Background(), query)
+	resp := s.conn.Exec(context.Background(), query)
+	if resp.Error != nil {
+		log.Println(resp.Error)
+	}
 
 	log.Println("Succsessfull vote")
 
 	return nil
 }
 
-func (s *TarantoolStorage) GetResults(pollID string) (map[string]int, error) {
+func (s *TarantoolStorage) GetResults(pollID string) (*PollResult, error) {
 	poll, err := s.GetPoll(pollID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get poll: %v", err)
 	}
 
-	results := make(map[string]int)
-	for opt := range poll.Options {
-		results[opt] = 0
+	query := &tarantool.Select{
+		Space:    "votes",
+		Index:    "primary",
+		KeyTuple: []interface{}{pollID},
 	}
-
-	query := &tarantool.Select{Space: "polls", Index: "primary", KeyTuple: []interface{}{pollID}}
 	resp := s.conn.Exec(context.Background(), query)
+
 	if resp.Error != nil {
-		return nil, resp.Error
+		return nil, fmt.Errorf("failed to get votes: %v", resp.Error)
 	}
+
+	votes := make(map[string]int)
+	totalVotes := 0
 
 	for _, item := range resp.Data {
-		data := item
-		option := data[2].(string)
-		results[option]++
+		if option, ok := item[2].(string); ok {
+			votes[option]++
+			totalVotes++
+		}
+	}
+
+	results := &PollResult{
+		PollID:     poll.ID,
+		Question:   poll.Question,
+		Options:    poll.Options,
+		Votes:      votes,
+		TotalVotes: totalVotes,
+		IsActive:   poll.IsActive,
 	}
 
 	log.Println("Get result")
@@ -193,7 +273,7 @@ func (s *TarantoolStorage) EndPoll(pollID, userID string) error {
 	resp := s.conn.Exec(context.Background(), query)
 
 	if resp.Error != nil {
-		return resp.Error
+		fmt.Errorf("poll does not exist")
 	}
 
 	log.Println("End poll")
@@ -213,7 +293,7 @@ func (s *TarantoolStorage) DeletePoll(pollID, userID string) error {
 	query := &tarantool.Delete{Space: "polls", KeyTuple: []interface{}{pollID}}
 	resp := s.conn.Exec(context.Background(), query)
 	if resp.Error != nil {
-		return resp.Error
+		return fmt.Errorf("poll does not exist")
 	}
 
 	query = &tarantool.Delete{Space: "votes", KeyTuple: []interface{}{pollID}}

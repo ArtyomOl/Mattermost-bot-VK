@@ -16,18 +16,18 @@ func main() {
 		log.Fatalf("Failed to initialize Tarantool storage: %v", err)
 	}
 
-	err = st.InitSchema("polls")
+	err = st.InitPollsSchema()
 	if err != nil {
-		log.Fatalf("Failed to create space: %v", err)
+		log.Fatalf("Failed to create polls space: %v", err)
 	}
-	err = st.InitSchema("votes")
+	err = st.InitVotesSchema()
 	if err != nil {
-		log.Fatalf("Failed to create space: %v", err)
+		log.Fatalf("Failed to create votes space: %v", err)
 	}
 
 	client := model.NewAPIv4Client(matcfg.URL)
 
-	client.SetToken("yzsqmq796b88mxw135fusjbnha")
+	client.SetToken(config.MattermostToken)
 	webSocketClient, err := model.NewWebSocketClient4(matcfg.WebSocketURL, client.AuthToken)
 	if err != nil {
 		log.Fatalf("WebSocket connection error: %v", err)
@@ -37,8 +37,8 @@ func main() {
 		Client:          client,
 		WebSocketClient: webSocketClient,
 		Store:           st,
-		UserID:          "sj1tz4q9it86pdmac87u4x8hoo",
-		ChannelID:       "tbczkzdgy7b98xikgpbyh15yzr",
+		UserID:          config.UserID,
+		ChannelID:       config.ChannelID,
 	}
 
 	webSocketClient.Listen()

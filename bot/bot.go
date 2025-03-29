@@ -50,23 +50,23 @@ func (b *Bot) HandleWebSocketResponse(event *model.WebSocketEvent) {
 	switch method_type {
 	case "create":
 		if err := b.handleCreatePoll(commandArgs); err != nil {
-			log.Fatalf("%e", err)
+			log.Printf("%e\n", err)
 		}
 	case "vote":
 		if err := b.handleVote(commandArgs); err != nil {
-			log.Fatalf("%e", err)
+			log.Printf("%e\n", err)
 		}
 	case "results":
 		if err := b.handleResults(commandArgs); err != nil {
-			log.Fatalf("%e", err)
+			log.Printf("%e\n", err)
 		}
 	case "end":
 		if err := b.handleEndPoll(commandArgs); err != nil {
-			log.Fatalf("%e", err)
+			log.Printf("%e\n", err)
 		}
 	case "delete":
 		if err := b.handleDeletePoll(commandArgs); err != nil {
-			log.Fatalf("%e", err)
+			log.Printf("%e\n", err)
 		}
 	default:
 		return
