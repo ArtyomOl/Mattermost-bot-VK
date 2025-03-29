@@ -4,6 +4,7 @@ import (
 	"Mattermost-bot-VK/config"
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/viciious/go-tarantool"
@@ -27,7 +28,7 @@ func NewTarantoolStorage(cfg config.TarantoolConfig) (*TarantoolStorage, error) 
 }
 
 func (s *TarantoolStorage) InitSchema(schemaName string) error {
-	query := &tarantool.Call{Name: "box.space.create", Tuple: []interface{}{
+	query := &tarantool.Call{Name: "box.schema.create_space", Tuple: []interface{}{
 		schemaName,
 		map[string]interface{}{
 			"format": []map[string]interface{}{
@@ -40,15 +41,25 @@ func (s *TarantoolStorage) InitSchema(schemaName string) error {
 			},
 		},
 	}}
-
 	s.conn.Exec(context.Background(), query)
 
-	query = &tarantool.Call{Name: "box.space." + schemaName + ":create_index", Tuple: []interface{}{"primary", map[string]interface{}{"parts": []string{"id"}, "if_not_exists": true}}}
-
+	query = &tarantool.Call{
+		Name: "box.space." + schemaName + ":create_index",
+		Tuple: []interface{}{
+			"primary",
+			map[string]interface{}{
+				"type":          "hash",
+				"parts":         []interface{}{"id"},
+				"if_not_exists": true,
+			},
+		},
+	}
 	resp := s.conn.Exec(context.Background(), query)
 	if resp.Error != nil {
-		return fmt.Errorf("failed to create polls space index: %w", resp.Error)
+		return fmt.Errorf("failed to create space index: %w", resp.Error)
 	}
+
+	log.Println("Init space")
 
 	return nil
 }
@@ -64,15 +75,16 @@ func (s *TarantoolStorage) CreatePoll(poll Poll) (string, error) {
 		poll.CreatorID,
 		poll.Question,
 		options,
-		poll.CreatedAt.Unix(),
+		uint64(poll.CreatedAt),
 		poll.IsActive,
 	},
 	}
-	resp := s.conn.Exec(context.Background(), query)
-
-	if len(resp.Data) == 0 {
-		return "", fmt.Errorf("no data returned from Tarantool")
+	result := s.conn.Exec(context.Background(), query)
+	if result.Error != nil {
+		return "", result.Error
 	}
+
+	log.Println("Create poll")
 
 	return poll.ID, nil
 }
@@ -100,15 +112,17 @@ func (s *TarantoolStorage) GetPoll(id string) (*Poll, error) {
 		}
 	}
 
-	createdAt := time.Unix(data[4].(int64), 0)
+	createdAt := time.Unix(int64(data[4].(uint64)), 0)
 	isActive := data[5].(bool)
+
+	log.Println("Get poll")
 
 	return &Poll{
 		ID:        data[0].(string),
 		CreatorID: data[1].(string),
 		Question:  data[2].(string),
 		Options:   options,
-		CreatedAt: createdAt,
+		CreatedAt: createdAt.Unix(),
 		IsActive:  isActive,
 	}, nil
 }
@@ -121,10 +135,6 @@ func (s *TarantoolStorage) Vote(pollID, userID, option string) error {
 	if !poll.IsActive {
 		return fmt.Errorf("poll is not active")
 	}
-	_, exists := poll.Options[option]
-	if !exists {
-		return fmt.Errorf("invalid option")
-	}
 
 	query := &tarantool.Insert{Space: "votes", Tuple: []interface{}{
 		pollID,
@@ -134,6 +144,8 @@ func (s *TarantoolStorage) Vote(pollID, userID, option string) error {
 	},
 	}
 	s.conn.Exec(context.Background(), query)
+
+	log.Println("Succsessfull vote")
 
 	return nil
 }
@@ -161,6 +173,8 @@ func (s *TarantoolStorage) GetResults(pollID string) (map[string]int, error) {
 		results[option]++
 	}
 
+	log.Println("Get result")
+
 	return results, nil
 }
 
@@ -173,7 +187,7 @@ func (s *TarantoolStorage) EndPoll(pollID, userID string) error {
 		return fmt.Errorf("only poll creator can end the poll")
 	}
 
-	query := &tarantool.Update{Space: "polls", Index: "primary", Key: []interface{}{pollID}, KeyTuple: []interface{}{
+	query := &tarantool.Update{Space: "polls", Index: "primary", Key: pollID, KeyTuple: []interface{}{
 		[]interface{}{"=", 5, false},
 	}}
 	resp := s.conn.Exec(context.Background(), query)
@@ -182,7 +196,9 @@ func (s *TarantoolStorage) EndPoll(pollID, userID string) error {
 		return resp.Error
 	}
 
-	return err
+	log.Println("End poll")
+
+	return nil
 }
 
 func (s *TarantoolStorage) DeletePoll(pollID, userID string) error {
@@ -205,6 +221,9 @@ func (s *TarantoolStorage) DeletePoll(pollID, userID string) error {
 	if resp.Error != nil {
 		return resp.Error
 	}
+
+	log.Println("Delete poll")
+
 	return nil
 }
 

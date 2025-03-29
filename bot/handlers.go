@@ -4,21 +4,36 @@ import (
 	"Mattermost-bot-VK/storage"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/mattermost/mattermost-server/v6/model"
+	"github.com/pborman/uuid"
 )
 
-func (b *VoteBot) handleCreatePoll(commandArgs *model.CommandArgs) (*model.CommandResponse, error) {
+func (b *Bot) SendMessage(message string) error {
+	poll := &model.Post{
+		ChannelId: b.ChannelID,
+		Message:   message,
+	}
+
+	_, _, err := b.Client.CreatePost(poll)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (b *Bot) handleCreatePoll(commandArgs *model.CommandArgs) error {
+	log.Println("Try to create poll")
+
 	args := strings.SplitN(commandArgs.Command, "\"", -1)
 	if len(args) < 5 {
-		return &model.CommandResponse{
-			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         "Invalid format",
-			ChannelId:    commandArgs.ChannelId,
-		}, nil
+		if err := b.SendMessage("Invalid request"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
 	}
 
 	question := args[1]
@@ -31,25 +46,23 @@ func (b *VoteBot) handleCreatePoll(commandArgs *model.CommandArgs) (*model.Comma
 	}
 
 	if len(options) < 2 {
-		return &model.CommandResponse{
-			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         "Poll must have at least 2 options",
-			ChannelId:    commandArgs.ChannelId,
-		}, nil
+		if err := b.SendMessage("Poll must have at least 2 options"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
 	}
 
 	poll := storage.Poll{
-		ID:        uuid.New().String(),
+		ID:        uuid.New(),
 		CreatorID: commandArgs.UserId,
 		Question:  question,
 		Options:   options,
-		CreatedAt: time.Now(),
+		CreatedAt: time.Now().Unix(),
 		IsActive:  true,
 	}
 
-	pollID, err := b.store.CreatePoll(poll)
+	pollID, err := b.Store.CreatePoll(poll)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create poll: %w", err)
+		return fmt.Errorf("failed to create poll: %w", err)
 	}
 
 	var optionsText strings.Builder
@@ -57,102 +70,125 @@ func (b *VoteBot) handleCreatePoll(commandArgs *model.CommandArgs) (*model.Comma
 		fmt.Fprintf(&optionsText, "%s: %s\n", id, text)
 	}
 
-	response := fmt.Sprintf(
-		"Poll created successfully!\nID: `%s`\nQuestion: %s\nOptions:\n%s\nTo vote use: `/vote %s option_id`",
-		pollID, question, optionsText.String(), pollID,
-	)
+	if err := b.SendMessage(fmt.Sprintf("Poll created succsessfully.\n To vote use command: /vote <pollID> <vote number>.\n PollID:%s", pollID)); err != nil {
+		return fmt.Errorf("error when sending a message: %e", err)
+	}
 
-	return &model.CommandResponse{
-		ResponseType: model.CommandResponseTypeInChannel,
-		Text:         response,
-		ChannelId:    commandArgs.ChannelId,
-	}, nil
+	log.Println("Created new poll")
+
+	return nil
 }
 
-func (b *VoteBot) handleVote(commandArgs *model.CommandArgs) (*model.CommandResponse, error) {
+func (b *Bot) handleVote(commandArgs *model.CommandArgs) error {
 	args := strings.Fields(commandArgs.Command)
+
+	if len(args) < 4 {
+		if err := b.SendMessage("Invalid request"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
+	}
 
 	pollID := args[2]
 	option := args[3]
 
-	err := b.store.Vote(pollID, commandArgs.UserId, option)
+	err := b.Store.Vote(pollID, commandArgs.UserId, option)
 	if err != nil {
-		return &model.CommandResponse{
-			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("Error voting: %v", err),
-			ChannelId:    commandArgs.ChannelId,
-		}, nil
+		if err := b.SendMessage("Something went wrong..."); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return err
 	}
 
-	return &model.CommandResponse{
-		ResponseType: model.CommandResponseTypeEphemeral,
-		Text:         "Vote recorded",
-		ChannelId:    commandArgs.ChannelId,
-	}, nil
+	if err := b.SendMessage("Succsessfull voting"); err != nil {
+		return fmt.Errorf("error when sending a message: %e", err)
+	}
+
+	return nil
 }
 
-func (b *VoteBot) handleResults(commandArgs *model.CommandArgs) (*model.CommandResponse, error) {
-	args := strings.Split(commandArgs.Command, "\"")
-	pollID := args[1]
+func (b *Bot) handleResults(commandArgs *model.CommandArgs) error {
+	args := strings.Split(commandArgs.Command, " ")
 
-	results, err := b.store.GetResults(pollID)
+	if len(args) != 3 {
+		if err := b.SendMessage("Invalid request"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
+	}
+
+	pollID := args[2]
+
+	results, err := b.Store.GetResults(pollID)
 	if err != nil {
-		return &model.CommandResponse{
-			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("Error: %v", err),
-			ChannelId:    commandArgs.ChannelId,
-		}, nil
+		if err := b.SendMessage("Something went wrong..."); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return err
 	}
 
 	response, err := json.Marshal(results)
 	if err != nil {
-		return &model.CommandResponse{
-			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("Error: %v", err),
-			ChannelId:    commandArgs.ChannelId,
-		}, nil
+		if err := b.SendMessage("Succsessfull voting"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return err
 	}
 
-	return &model.CommandResponse{
-		ResponseType: model.CommandResponseTypeInChannel,
-		Text:         string(response[:]),
-		ChannelId:    commandArgs.ChannelId,
-	}, nil
-}
-func (b *VoteBot) handleEndPoll(commandArgs *model.CommandArgs) (*model.CommandResponse, error) {
-	args := strings.Split(commandArgs.Command, "\"")
-	pollID := args[1]
-	err := b.store.EndPoll(pollID, commandArgs.UserId)
-	if err != nil {
-		return &model.CommandResponse{
-			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("Error: %v", err),
-			ChannelId:    commandArgs.ChannelId,
-		}, nil
+	if err := b.SendMessage("Results: " + string(response)); err != nil {
+		return fmt.Errorf("error when sending a message: %e", err)
 	}
-
-	return &model.CommandResponse{
-		ResponseType: model.CommandResponseTypeEphemeral,
-		Text:         "Voting has been completed successfully",
-		ChannelId:    commandArgs.ChannelId,
-	}, nil
+	return err
 }
 
-func (b *VoteBot) handleDeletePoll(commandArgs *model.CommandArgs) (*model.CommandResponse, error) {
-	args := strings.Split(commandArgs.Command, "\"")
-	pollID := args[1]
-	err := b.store.DeletePoll(pollID, commandArgs.UserId)
-	if err != nil {
-		return &model.CommandResponse{
-			ResponseType: model.CommandResponseTypeEphemeral,
-			Text:         fmt.Sprintf("Error: %v", err),
-			ChannelId:    commandArgs.ChannelId,
-		}, nil
+func (b *Bot) handleEndPoll(commandArgs *model.CommandArgs) error {
+	args := strings.Split(commandArgs.Command, " ")
+
+	if len(args) != 3 {
+		if err := b.SendMessage("Invalid request"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
 	}
 
-	return &model.CommandResponse{
-		ResponseType: model.CommandResponseTypeEphemeral,
-		Text:         "Voting has been deleted successfully",
-		ChannelId:    commandArgs.ChannelId,
-	}, nil
+	pollID := args[2]
+	err := b.Store.EndPoll(pollID, commandArgs.UserId)
+	if err != nil {
+		if err := b.SendMessage("Something went wrong..."); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return err
+	}
+
+	if err := b.SendMessage("End poll"); err != nil {
+		return fmt.Errorf("error when sending a message: %e", err)
+	}
+
+	return nil
+}
+
+func (b *Bot) handleDeletePoll(commandArgs *model.CommandArgs) error {
+	args := strings.Split(commandArgs.Command, " ")
+
+	if len(args) != 3 {
+		if err := b.SendMessage("Invalid request"); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return nil
+	}
+
+	pollID := args[2]
+	err := b.Store.DeletePoll(pollID, commandArgs.UserId)
+	if err != nil {
+		if err := b.SendMessage("Something went wrong..."); err != nil {
+			return fmt.Errorf("error when sending a message: %e", err)
+		}
+		return err
+	}
+
+	if err := b.SendMessage("Delete poll"); err != nil {
+		return fmt.Errorf("error when sending a message: %e", err)
+	}
+
+	return nil
 }

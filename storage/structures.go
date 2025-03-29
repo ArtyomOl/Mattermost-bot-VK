@@ -18,7 +18,7 @@ type Poll struct {
 	CreatorID string            `json:"creator_id"`
 	Question  string            `json:"question"`
 	Options   map[string]string `json:"options"`
-	CreatedAt time.Time         `json:"created_at"`
+	CreatedAt int64             `json:"created_at"`
 	IsActive  bool              `json:"is_active"`
 }
 

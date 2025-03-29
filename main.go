@@ -1,43 +1,53 @@
 package main
 
 import (
+	"Mattermost-bot-VK/bot"
 	"Mattermost-bot-VK/config"
 	"Mattermost-bot-VK/storage"
-	"fmt"
 	"log"
-	"time"
+
+	"github.com/mattermost/mattermost-server/v6/model"
 )
 
 func main() {
-	tarcfg := config.TarantoolConfig{Address: "127.0.0.1:3301"}
-	s, err := storage.NewTarantoolStorage(tarcfg)
+	tarcfg, matcfg := config.LoadConfig()
+	st, err := storage.NewTarantoolStorage(tarcfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize Tarantool storage: %v", err)
 	}
 
-	err = s.InitSchema("polls")
+	err = st.InitSchema("polls")
 	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to create space: %v", err)
 	}
-	err = s.InitSchema("votes")
+	err = st.InitSchema("votes")
 	if err != nil {
-		panic(err)
-	}
-
-	new_poll := storage.Poll{ID: "1234",
-		CreatorID: "123",
-		Question:  "Test_question",
-		Options:   map[string]string{"u12": "test1", "u23": "test2"},
-		CreatedAt: time.Now(),
-		IsActive:  true}
-	s.CreatePoll(new_poll)
-
-	poll, err := s.GetPoll("1234")
-	if err != nil {
-		panic(err)
+		log.Fatalf("Failed to create space: %v", err)
 	}
 
-	fmt.Println(*poll)
+	client := model.NewAPIv4Client(matcfg.URL)
 
-	defer s.Close()
+	client.SetToken("yzsqmq796b88mxw135fusjbnha")
+	webSocketClient, err := model.NewWebSocketClient4(matcfg.WebSocketURL, client.AuthToken)
+	if err != nil {
+		log.Fatalf("WebSocket connection error: %v", err)
+	}
+
+	vote_bot := &bot.Bot{
+		Client:          client,
+		WebSocketClient: webSocketClient,
+		Store:           st,
+		UserID:          "sj1tz4q9it86pdmac87u4x8hoo",
+		ChannelID:       "tbczkzdgy7b98xikgpbyh15yzr",
+	}
+
+	webSocketClient.Listen()
+	go func() {
+		for resp := range webSocketClient.EventChannel {
+			vote_bot.HandleWebSocketResponse(resp)
+		}
+	}()
+
+	log.Println("Bot started succsessfully")
+	select {}
 }

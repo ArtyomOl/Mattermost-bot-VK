@@ -3,79 +3,72 @@ package bot
 import (
 	"Mattermost-bot-VK/config"
 	"Mattermost-bot-VK/storage"
-	"fmt"
+	"encoding/json"
 	"log"
 	"strings"
 
 	"github.com/mattermost/mattermost-server/v6/model"
 )
 
-type VoteBot struct {
-	client *model.Client4
-	store  storage.Storage
-	config *config.MattermostConfig
-	userID string
+type Bot struct {
+	Client          *model.Client4
+	WebSocketClient *model.WebSocketClient
+	Store           *storage.TarantoolStorage
+	Config          *config.MattermostConfig
+	UserID          string
+	ChannelID       string
 }
 
-func NewVoteBot(client *model.Client4, store storage.Storage, cfg *config.MattermostConfig) *VoteBot {
-	return &VoteBot{
-		client: client,
-		store:  store,
-		config: cfg,
-	}
-}
-
-func (b *VoteBot) Start() error {
-	// Получаем информацию о боте
-	user, _, err := b.client.GetMe("")
-	if err != nil {
-		return fmt.Errorf("failed to get bot user: %w", err)
-	}
-	b.userID = user.Id
-
-	// Регистрируем команды
-	if err := b.registerCommands(); err != nil {
-		return fmt.Errorf("failed to register commands: %w", err)
+func (b *Bot) HandleWebSocketResponse(event *model.WebSocketEvent) {
+	if event.EventType() != model.WebsocketEventPosted {
+		return
 	}
 
-	log.Println("Bot started successfully")
-	return nil
-}
-
-func (b *VoteBot) Stop() {
-	log.Println("Bot stopped")
-}
-
-func (b *VoteBot) registerCommands() error {
-	command := &model.Command{
-		Trigger:          "vote",
-		AutoComplete:     true,
-		AutoCompleteDesc: "Manage polls: create, vote, results, end, delete",
-		AutoCompleteHint: "[command] [args]",
-		DisplayName:      "Vote Bot",
-		Description:      "Create and manage polls in channels",
-		URL:              fmt.Sprintf("%s/plugins/com.mattermost.vote-bot/command", b.config.URL),
+	var post model.Post
+	if err := json.Unmarshal([]byte(event.GetData()["post"].(string)), &post); err != nil {
+		log.Printf("Unmarhall error: %v", err)
+		return
 	}
 
-	_, _, err := b.client.CreateCommand(command)
-	return err
-}
+	if post.UserId == b.UserID {
+		return
+	}
 
-func (b *VoteBot) HandleCommand(commandArgs *model.CommandArgs) (*model.CommandResponse, error) {
-	args := strings.Fields(commandArgs.Command)
+	args := strings.Split(post.Message, "\"")
+	if len(args) < 1 {
+		return
+	}
+	commandArgs := &model.CommandArgs{UserId: b.UserID, ChannelId: b.ChannelID, Command: post.Message}
+	if len(strings.Split(args[0], " ")) < 2 {
+		return
+	}
+	if strings.Split(args[0], " ")[0] != "/poll" {
+		return
+	}
+	method_type := strings.Split(args[0], " ")[1]
 
-	switch args[1] {
+	switch method_type {
 	case "create":
-		return b.handleCreatePoll(commandArgs)
+		if err := b.handleCreatePoll(commandArgs); err != nil {
+			log.Fatalf("%e", err)
+		}
 	case "vote":
-		return b.handleVote(commandArgs)
+		if err := b.handleVote(commandArgs); err != nil {
+			log.Fatalf("%e", err)
+		}
 	case "results":
-		return b.handleResults(commandArgs)
+		if err := b.handleResults(commandArgs); err != nil {
+			log.Fatalf("%e", err)
+		}
 	case "end":
-		return b.handleEndPoll(commandArgs)
+		if err := b.handleEndPoll(commandArgs); err != nil {
+			log.Fatalf("%e", err)
+		}
 	case "delete":
-		return b.handleDeletePoll(commandArgs)
+		if err := b.handleDeletePoll(commandArgs); err != nil {
+			log.Fatalf("%e", err)
+		}
 	default:
-		return nil, fmt.Errorf("invalid request")
+		return
 	}
 }
